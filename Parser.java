@@ -23,6 +23,9 @@ public class Parser {
     static final Pattern LOOP = Pattern.compile("loop");
     static final Pattern IF = Pattern.compile("if");
     static final Pattern MOVE = Pattern.compile("move");
+    static final Pattern RELOP = Pattern.compile("lt|gt|eq");
+    static final Pattern SENS = Pattern.compile("fuelLeft|oppLR|oppFB|numBarrels|barrelLR|barrelFB|wallDist");
+    static final Pattern COMMA = Pattern.compile(",");
 
     static enum RELOP {
         LT, GT, EQ
@@ -116,11 +119,69 @@ public class Parser {
     }
 
     private ProgramNode parseWHILE(Scanner scanner) {
+        require(WHILE, "expecting 'while'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode condition = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new WhileNode(condition, parseBLOCK(scanner));
 
     }
 
-    private ProgramNode parseIF(Scanner scanner) {
+    private BooleanNode parseCOND(Scanner scanner) {
+        String relop = require(RELOP, "expecting condition", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        SensorNode sensor = parseSENS(scanner);
+        require(COMMA, "expecting ','", scanner);
+        int value = requireInt(NUMPAT, "expecting a number", scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new ConditionNode(parseRELOP(scanner, relop, sensor, value));
+    }
 
+    private BooleanNode parseRELOP(Scanner scanner, String relop, SensorNode sensor, int value) {
+        switch (relop) {
+            case "lt":
+                return new LessThanNode(sensor, value);
+            case "gt":
+                return new GreaterThanNode(sensor, value);
+            case "eq":
+                return new EqualToNode(sensor, value);
+        }
+        fail("Unknown relop", scanner);
+        return null;
+    }
+
+    private SensorNode parseSENS(Scanner scanner) {
+        String sensor = require(SENS, "expecting a sensor", scanner);
+        return new SensorNode(parseSENS(scanner, sensor));
+    }
+
+    private IntNode parseSENS(Scanner scanner, String sensor) {
+        switch (sensor) {
+            case "fuelLeft":
+                return new GetFuelNode();
+            case "oppLR":
+                return new GetOpponentLR();
+            case "oppFB":
+                return new GetOpponentFB();
+            case "numBarrels":
+                return new GetNumBarrels();
+            case "barrelLR":
+                return new GetClosestBarrelLR();
+            case "barrelFB":
+                return new GetClosestBarrelFB();
+            case "wallDist":
+                return new GetWallDistance();
+        }
+        fail("Unknown sensor", scanner);
+        return null;
+    }
+
+    private ProgramNode parseIF(Scanner scanner) {
+        require(IF, "expecting 'if'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode condition = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new IfNode(condition, parseBLOCK(scanner));
     }
 
     /**
@@ -155,6 +216,12 @@ public class Parser {
                 return new TakeFuelNode();
             case "wait":
                 return new WaitNode();
+            case "shieldOn":
+                return new ShieldOnNode();
+            case "shieldOff":
+                return new ShieldOffNode();
+            case "turnAround":
+                return new TurnAroundNode();
         }
         fail("Unknown action", scanner);
         return null;
