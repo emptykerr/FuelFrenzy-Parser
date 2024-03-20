@@ -1,17 +1,16 @@
 
 public class LessThanNode implements BooleanNode {
 
-    private IntNode condition;
-    private int value;
+    private IntNode left;
+    private IntNode right;
 
-    public LessThanNode(IntNode condition, int value) {
-        this.condition = condition;
-        this.value = value;
+    public LessThanNode(IntNode left, IntNode right) {
+        this.left = left;
+        this.right = right;
     }
 
-    @Override
     public boolean evaluate(Robot robot) {
-        return condition.evaluate(robot) < value;
+        return left.evaluate(robot) < right.evaluate(robot);
     }
 
     public String toString() {

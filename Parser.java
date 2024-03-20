@@ -26,6 +26,7 @@ public class Parser {
     static final Pattern RELOP = Pattern.compile("lt|gt|eq");
     static final Pattern SENS = Pattern.compile("fuelLeft|oppLR|oppFB|numBarrels|barrelLR|barrelFB|wallDist");
     static final Pattern COMMA = Pattern.compile(",");
+    static final Pattern OP = Pattern.compile("add|sub|mul|div");
 
     static enum RELOP {
         LT, GT, EQ
@@ -54,19 +55,23 @@ public class Parser {
      * GRAMMAR
      * PROG ::= [ STMT ]*
      * STMT ::= ACT ";" | LOOP | IF | WHILE
-     * ACT ::= "move" | "turnL" | "turnR" | "turnAround" | "shieldOn" |
-     * "shieldOff" | "takeFuel" | "wait"
+     * ACT ::= "move" [ "(" EXPR ")" ] | "turnL" | "turnR" | "turnAround" |
+     * "shieldOn" | "shieldOff" | "takeFuel" | "wait" [ "(" EXPR ")" ]
      * LOOP ::= "loop" BLOCK
-     * IF ::= "if" "(" COND ")" BLOCK
+     * IF ::= "if" "(" COND ")" BLOCK [ "else" BLOCK ]
      * WHILE ::= "while" "(" COND ")" BLOCK
      * BLOCK ::= "{" STMT+ "}"
-     * COND ::= RELOP "(" SENS "," NUM ")
-     * RELOP ::= "lt" | "gt" | "eq"
+     * EXPR ::= NUM | SENS | OP "(" EXPR "," EXPR ")"
      * SENS ::= "fuelLeft" | "oppLR" | "oppFB" | "numBarrels" |
      * "barrelLR" | "barrelFB" | "wallDist"
+     * OP ::= "add" | "sub" | "mul" | "div"
+     * COND ::= "and" "(" COND "," COND ")" | "or" "(" COND "," COND ")" | "not" "("
+     * COND ")" |
+     * RELOP "(" EXPR "," EXPR ")
+     * RELOP ::= "lt" | "gt" | "eq"
      * NUM ::= "-?[1-9][0-9]*|0"
-     * 
      * /**
+     * 
      * 
      * PROG ::= [ STMT ]*
      * Parses a program node
@@ -102,6 +107,7 @@ public class Parser {
      * @param scanner
      * @return a statement node
      */
+
     private ProgramNode parseSTMT(Scanner scanner) {
         if (scanner.hasNext(ACTION)) {
             ProgramNode actionNode = parseACT(scanner);
@@ -128,25 +134,151 @@ public class Parser {
     }
 
     private BooleanNode parseCOND(Scanner scanner) {
-        String relop = require(RELOP, "expecting condition", scanner);
-        require(OPENPAREN, "expecting '('", scanner);
-        SensorNode sensor = parseSENS(scanner);
-        require(COMMA, "expecting ','", scanner);
-        int value = requireInt(NUMPAT, "expecting a number", scanner);
-        require(CLOSEPAREN, "expecting ')'", scanner);
-        return new ConditionNode(parseRELOP(scanner, relop, sensor, value));
+        if (scanner.hasNext("and")) {
+            return parseAND(scanner);
+        } else if (scanner.hasNext("or")) {
+            return parseOR(scanner);
+        } else if (scanner.hasNext("not")) {
+            return parseNOT(scanner);
+        } else if (scanner.hasNext(RELOP)) {
+            return parseRELOP(scanner);
+        }
+        fail("Unknown condition", scanner);
+        return null;
     }
 
-    private BooleanNode parseRELOP(Scanner scanner, String relop, SensorNode sensor, int value) {
+    private BooleanNode parseAND(Scanner scanner) {
+        require("and", "expecting 'and'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode left = parseCOND(scanner);
+        require(COMMA, "expecting ','", scanner);
+        BooleanNode right = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new AndNode(left, right);
+    }
+
+    private BooleanNode parseOR(Scanner scanner) {
+        require("or", "expecting 'or'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode left = parseCOND(scanner);
+        require(COMMA, "expecting ','", scanner);
+        BooleanNode right = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new OrNode(left, right);
+    }
+
+    private BooleanNode parseNOT(Scanner scanner) {
+        require("not", "expecting 'not'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode condition = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new NotNode(condition);
+    }
+
+    private BooleanNode parseRELOP(Scanner scanner) {
+        String relop = require(RELOP, "expecting a relop", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        IntNode left = parseEXPR(scanner);
+        require(COMMA, "expecting ','", scanner);
+        IntNode right = parseEXPR(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return parseRELOP(scanner, relop, left, right);
+    }
+
+    private BooleanNode parseRELOP(Scanner scanner, String relop, IntNode left, IntNode right) {
         switch (relop) {
             case "lt":
-                return new LessThanNode(sensor, value);
+                return new LessThanNode(left, right);
             case "gt":
-                return new GreaterThanNode(sensor, value);
+                return new GreaterThanNode(left, right);
             case "eq":
-                return new EqualToNode(sensor, value);
+                return new EqualToNode(left, right);
         }
         fail("Unknown relop", scanner);
+        return null;
+    }
+
+    private ProgramNode parseIF(Scanner scanner) {
+        require(IF, "expecting 'if'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode condition = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        BlockNode ifBlock = parseBLOCK(scanner);
+        if (checkFor("else", scanner)) {
+            return new ElseNode(parseBLOCK(scanner));
+        }
+        return new IfNode(condition, ifBlock);
+    }
+
+    /**
+     * ACT ::= "move" | "turnL" | "turnR" | "takeFuel" | "wait"
+     * Parses an action node
+     * 
+     * @param scanner
+     * @return an action node
+     */
+    private ProgramNode parseACT(Scanner scanner) {
+        String action = require(ACTION, "expecting an action", scanner);
+        ProgramNode node = parseCMD(scanner, action);
+        return new ActionNode(node);
+    }
+
+    /**
+     * Parses an action for the action node
+     * 
+     * @param scanner
+     * @param action
+     * @return a an action node
+     */
+    private ProgramNode parseCMD(Scanner scanner, String action) {
+        switch (action) {
+            case "move":
+                if (checkFor(OPENPAREN, scanner)) {
+                    IntNode value = parseEXPR(scanner);
+                    require(CLOSEPAREN, "expecting ')'", scanner);
+                    return (ProgramNode) new MoveNode(value);
+                }
+                return (ProgramNode) new MoveNode();
+            case "turnL":
+                return new TurnLNode();
+            case "turnR":
+                return new TurnRNode();
+            case "takeFuel":
+                return new TakeFuelNode();
+            case "wait":
+                if (checkFor(OPENPAREN, scanner)) {
+                    IntNode value = parseEXPR(scanner);
+                    require(CLOSEPAREN, "expecting ')'", scanner);
+                    return (ProgramNode) new WaitNode(value);
+                }
+                return new WaitNode();
+            case "shieldOn":
+                return new ShieldOnNode();
+            case "shieldOff":
+                return new ShieldOffNode();
+            case "turnAround":
+                return new TurnAroundNode();
+        }
+        fail("Unknown action", scanner);
+        return null;
+    }
+
+    /**
+     * EXPR ::= NUM | SENS | OP "(" EXPR "," EXPR ")"
+     * Parses an expression node
+     * 
+     * @param scanner
+     * @return an expression node
+     */
+    private IntNode parseEXPR(Scanner scanner) {
+        if (scanner.hasNext(NUMPAT)) {
+            return parseNUM(scanner);
+        } else if (scanner.hasNext(SENS)) {
+            return parseSENS(scanner);
+        } else if (scanner.hasNext(OP)) {
+            return parseOP(scanner);
+        }
+        fail("Unknown expression", scanner);
         return null;
     }
 
@@ -176,55 +308,18 @@ public class Parser {
         return null;
     }
 
-    private ProgramNode parseIF(Scanner scanner) {
-        require(IF, "expecting 'if'", scanner);
+    private IntNode parseNUM(Scanner scanner) {
+        return new NumberNode(requireInt(NUMPAT, "expecting a number", scanner));
+    }
+
+    private IntNode parseOP(Scanner scanner) {
+        String op = require(OP, "expecting an operator", scanner);
         require(OPENPAREN, "expecting '('", scanner);
-        BooleanNode condition = parseCOND(scanner);
+        IntNode left = parseEXPR(scanner);
+        require(COMMA, "expecting ','", scanner);
+        IntNode right = parseEXPR(scanner);
         require(CLOSEPAREN, "expecting ')'", scanner);
-        return new IfNode(condition, parseBLOCK(scanner));
-    }
-
-    /**
-     * ACT ::= "move" | "turnL" | "turnR" | "takeFuel" | "wait"
-     * Parses an action node
-     * 
-     * @param scanner
-     * @return an action node
-     */
-    private ProgramNode parseACT(Scanner scanner) {
-        String action = require(ACTION, "expecting an action", scanner);
-        ProgramNode node = parseCMD(scanner, action);
-        return new ActionNode(node);
-    }
-
-    /**
-     * Parses an action for the action node
-     * 
-     * @param scanner
-     * @param action
-     * @return a an action node
-     */
-    private ProgramNode parseCMD(Scanner scanner, String action) {
-        switch (action) {
-            case "move":
-                return (ProgramNode) new MoveNode();
-            case "turnL":
-                return new TurnLNode();
-            case "turnR":
-                return new TurnRNode();
-            case "takeFuel":
-                return new TakeFuelNode();
-            case "wait":
-                return new WaitNode();
-            case "shieldOn":
-                return new ShieldOnNode();
-            case "shieldOff":
-                return new ShieldOffNode();
-            case "turnAround":
-                return new TurnAroundNode();
-        }
-        fail("Unknown action", scanner);
-        return null;
+        return new OperationNode(op, left, right);
     }
 
     /**
@@ -251,6 +346,9 @@ public class Parser {
         List<ProgramNode> statements = new ArrayList<ProgramNode>();
         while (!scanner.hasNext(CLOSEBRACE)) {
             statements.add(parseSTMT(scanner));
+        }
+        if (statements.isEmpty()) {
+            return null;
         }
         require(CLOSEBRACE, "expecting '}'", scanner);
         return new BlockNode(statements);
