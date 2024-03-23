@@ -27,14 +27,24 @@ public class Parser {
     static final Pattern SENS = Pattern.compile("fuelLeft|oppLR|oppFB|numBarrels|barrelLR|barrelFB|wallDist");
     static final Pattern COMMA = Pattern.compile(",");
     static final Pattern OP = Pattern.compile("add|sub|mul|div");
+    static final Pattern VAR = Pattern.compile("\\$[A-Za-z][A-Za-z0-9]*");
 
-    static enum RELOP {
-        LT, GT, EQ
-    }
-
-    static enum SENS {
-        FUELLEFT, OPPLR, OPPFB, NUMBARRELS, BARRELLR, BARRELRB, WALLDIST
-    }
+    /**
+     * Variables are identifiers starting with a $, and can hold integer values.
+     * Assignment statements can assign a value to a variable, and variables can be
+     * used inside expressions. Variables do not need to be declared. If a variable
+     * is used in an expression before a value has been assigned to it, it is
+     * assumed to have the value 0. The scope of all variables is the whole program.
+     * 
+     * Evaluating an expression now needs to be able to access a map containing all
+     * the current variables and their values, and an assignment statement needs to
+     * update the value of a variable in the map. If a variable being accessed which
+     * is not in the map should be added and given the value 0.
+     * 
+     * @param s
+     * @return
+     */
+    static Map<String, Integer> variables = new HashMap<String, Integer>();
 
     // ----------------------------------------------------------------
     /**
@@ -54,21 +64,23 @@ public class Parser {
     /**
      * GRAMMAR
      * PROG ::= [ STMT ]*
-     * STMT ::= ACT ";" | LOOP | IF | WHILE
+     * STMT ::= ACT ";" | LOOP | IF | WHILE | ASSGN ";"
+     * LOOP ::= "loop" BLOCK
+     * IF ::= "if" "(" COND ")" BLOCK [ "elif" "(" COND ")" BLOCK ]* [ "else" BLOCK
+     * ]
+     * WHILE ::= "while" "(" COND ")" BLOCK
+     * ASSGN ::= VAR "=" EXPR
+     * BLOCK ::= "{" STMT+ "}"
      * ACT ::= "move" [ "(" EXPR ")" ] | "turnL" | "turnR" | "turnAround" |
      * "shieldOn" | "shieldOff" | "takeFuel" | "wait" [ "(" EXPR ")" ]
-     * LOOP ::= "loop" BLOCK
-     * IF ::= "if" "(" COND ")" BLOCK [ "else" BLOCK ]
-     * WHILE ::= "while" "(" COND ")" BLOCK
-     * BLOCK ::= "{" STMT+ "}"
-     * EXPR ::= NUM | SENS | OP "(" EXPR "," EXPR ")"
+     * EXPR ::= NUM | SENS | VAR | OP "(" EXPR "," EXPR ")"
      * SENS ::= "fuelLeft" | "oppLR" | "oppFB" | "numBarrels" |
-     * "barrelLR" | "barrelFB" | "wallDist"
+     * "barrelLR" [ "(" EXPR ")" ] | "barrelFB" [ "(" EXPR ")" ] | "wallDist"
      * OP ::= "add" | "sub" | "mul" | "div"
-     * COND ::= "and" "(" COND "," COND ")" | "or" "(" COND "," COND ")" | "not" "("
-     * COND ")" |
-     * RELOP "(" EXPR "," EXPR ")
+     * COND ::= RELOP "(" EXPR "," EXPR ")" | and ( COND, COND ) | or ( COND, COND )
+     * | not ( COND )
      * RELOP ::= "lt" | "gt" | "eq"
+     * VAR ::= "\\$[A-Za-z][A-Za-z0-9]*"
      * NUM ::= "-?[1-9][0-9]*|0"
      * /**
      * 
@@ -119,6 +131,8 @@ public class Parser {
             return parseIF(scanner);
         } else if (scanner.hasNext(WHILE)) {
             return parseWHILE(scanner);
+        } else if (scanner.hasNext(VAR)) {
+            return parseASSGN(scanner);
         }
         fail("Unknown statement", scanner);
         return null;
@@ -204,10 +218,23 @@ public class Parser {
         BooleanNode condition = parseCOND(scanner);
         require(CLOSEPAREN, "expecting ')'", scanner);
         BlockNode ifBlock = parseBLOCK(scanner);
-        if (checkFor("else", scanner)) {
-            return new ElseNode(parseBLOCK(scanner));
+        List<ElseIfNode> elifs = new ArrayList<ElseIfNode>();
+        while (scanner.hasNext("elif")) {
+            elifs.add(parseELIF(scanner));
         }
-        return new IfNode(condition, ifBlock);
+        ElseNode elseBranch = null;
+        if (checkFor("else", scanner)) {
+            elseBranch = new ElseNode(parseBLOCK(scanner), elifs);
+        }
+        return new IfNode(condition, ifBlock, elifs, elseBranch);
+    }
+
+    private ElseIfNode parseELIF(Scanner scanner) {
+        require("elif", "expecting 'elif'", scanner);
+        require(OPENPAREN, "expecting '('", scanner);
+        BooleanNode condition = parseCOND(scanner);
+        require(CLOSEPAREN, "expecting ')'", scanner);
+        return new ElseIfNode(condition, parseBLOCK(scanner));
     }
 
     /**
@@ -277,6 +304,8 @@ public class Parser {
             return parseSENS(scanner);
         } else if (scanner.hasNext(OP)) {
             return parseOP(scanner);
+        } else if (scanner.hasNext(VAR)) {
+            return parseVAR(scanner);
         }
         fail("Unknown expression", scanner);
         return null;
@@ -287,6 +316,50 @@ public class Parser {
         return new SensorNode(parseSENS(scanner, sensor));
     }
 
+    /**
+     * Variables are identifiers starting with a $, and can hold integer values.
+     * Assignment statements can assign a value to a variable, and variables can be
+     * used inside expressions. Variables do not need to be declared. If a variable
+     * is used in an expression before a value has been assigned to it, it is
+     * assumed to have the value 0. The scope of all variables is the whole program.
+     * 
+     * Evaluating an expression now needs to be able to access a map containing all
+     * the current variables and their values, and an assignment statement needs to
+     * update the value of a variable in the map. If a variable being accessed which
+     * is not in the map should be added and given the value 0.
+     * 
+     * @param scanner
+     * @param sensor
+     * @return
+     */
+    private ProgramNode parseASSGN(Scanner scanner) {
+        String var = require(VAR, "expecting a variable", scanner);
+        if (!variables.containsKey(var)) {
+            variables.put(var, 0);
+        }
+        require("=", "expecting '='", scanner);
+        IntNode value = parseEXPR(scanner);
+        variables.put(var, value.evaluate(null));
+        require(SEMICOLON, "expecting ';'", scanner);
+        return new AssignmentNode(var, value);
+    }
+
+    private IntNode parseVAR(Scanner scanner) {
+        String var = require(VAR, "expecting a variable", scanner);
+        if (!variables.containsKey(var)) {
+            variables.put(var, 0);
+        }
+        return new NumberNode(variables.get(var));
+    }
+
+    /**
+     * SENS ::= "fuelLeft" | "oppLR" | "oppFB" | "numBarrels" |
+     * "barrelLR" [ "(" EXPR ")" ] | "barrelFB" [ "(" EXPR ")" ] | "wallDist"
+     * 
+     * @param scanner
+     * @param sensor
+     * @return
+     */
     private IntNode parseSENS(Scanner scanner, String sensor) {
         switch (sensor) {
             case "fuelLeft":
@@ -298,8 +371,18 @@ public class Parser {
             case "numBarrels":
                 return new GetNumBarrels();
             case "barrelLR":
+                if (checkFor(OPENPAREN, scanner)) {
+                    IntNode value = parseEXPR(scanner);
+                    require(CLOSEPAREN, "expecting ')'", scanner);
+                    return new GetClosestBarrelLR(value);
+                }
                 return new GetClosestBarrelLR();
             case "barrelFB":
+                if (checkFor(OPENPAREN, scanner)) {
+                    IntNode value = parseEXPR(scanner);
+                    require(CLOSEPAREN, "expecting ')'", scanner);
+                    return new GetClosestBarrelFB(value);
+                }
                 return new GetClosestBarrelFB();
             case "wallDist":
                 return new GetWallDistance();

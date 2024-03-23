@@ -11,7 +11,13 @@ public class WaitNode implements ProgramNode {
 
     @Override
     public void execute(Robot robot) {
-        for (int i = 0; i < value.evaluate(robot); i++) {
+
+        if (value == null) {
+            robot.idleWait();
+            return;
+        }
+        int stepsToWait = value.evaluate(robot);
+        for (int i = 0; i < stepsToWait; i++) {
             robot.idleWait();
         }
     }

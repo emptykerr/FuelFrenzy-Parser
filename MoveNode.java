@@ -13,7 +13,12 @@ public class MoveNode implements ProgramNode {
      * Executes action based on number of value times
      */
     public void execute(Robot robot) {
-        for (int i = 0; i < value.evaluate(robot); i++) {
+        if (value == null) {
+            robot.move();
+            return;
+        }
+        int stepsToMove = value.evaluate(robot);
+        for (int i = 0; i < stepsToMove; i++) {
             robot.move();
         }
     }
