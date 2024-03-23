@@ -44,7 +44,7 @@ public class Parser {
      * @param s
      * @return
      */
-    static Map<String, Integer> variables = new HashMap<String, Integer>();
+    static Map<String, IntNode> variables = new HashMap<String, IntNode>();
 
     // ----------------------------------------------------------------
     /**
@@ -144,18 +144,17 @@ public class Parser {
         BooleanNode condition = parseCOND(scanner);
         require(CLOSEPAREN, "expecting ')'", scanner);
         return new WhileNode(condition, parseBLOCK(scanner));
-
     }
 
     private BooleanNode parseCOND(Scanner scanner) {
-        if (scanner.hasNext("and")) {
+        if (scanner.hasNext(RELOP)) {
+            return parseRELOP(scanner);
+        } else if (scanner.hasNext("and")) {
             return parseAND(scanner);
         } else if (scanner.hasNext("or")) {
             return parseOR(scanner);
         } else if (scanner.hasNext("not")) {
             return parseNOT(scanner);
-        } else if (scanner.hasNext(RELOP)) {
-            return parseRELOP(scanner);
         }
         fail("Unknown condition", scanner);
         return null;
@@ -202,6 +201,7 @@ public class Parser {
     private BooleanNode parseRELOP(Scanner scanner, String relop, IntNode left, IntNode right) {
         switch (relop) {
             case "lt":
+                System.out.println(left + " " + right);
                 return new LessThanNode(left, right);
             case "gt":
                 return new GreaterThanNode(left, right);
@@ -335,11 +335,12 @@ public class Parser {
     private ProgramNode parseASSGN(Scanner scanner) {
         String var = require(VAR, "expecting a variable", scanner);
         if (!variables.containsKey(var)) {
-            variables.put(var, 0);
+            variables.put(var, new NumberNode(0));
         }
         require("=", "expecting '='", scanner);
         IntNode value = parseEXPR(scanner);
-        variables.put(var, value.evaluate(null));
+        variables.put(var, value);
+        System.out.println("VALUE: " + var + value);
         require(SEMICOLON, "expecting ';'", scanner);
         return new AssignmentNode(var, value);
     }
@@ -347,9 +348,9 @@ public class Parser {
     private IntNode parseVAR(Scanner scanner) {
         String var = require(VAR, "expecting a variable", scanner);
         if (!variables.containsKey(var)) {
-            variables.put(var, 0);
+            variables.put(var, new NumberNode(0));
         }
-        return new NumberNode(variables.get(var));
+        return variables.get(var);
     }
 
     /**
@@ -519,3 +520,748 @@ public class Parser {
 // class BlockNode implements ProgramNode {.....
 // with fields, a toString() method and an execute() method
 //
+
+class ActionNode implements ProgramNode {
+    private ProgramNode instruction;
+
+    public ActionNode(ProgramNode instruction) {
+        this.instruction = instruction;
+    }
+
+    @Override
+    // Executes the corresponding action node for the robot
+    public void execute(Robot robot) {
+        instruction.execute(robot);
+
+    }
+
+    public String toString() {
+        return instruction.toString();
+    }
+}
+
+class AndNode implements BooleanNode {
+
+    BooleanNode left;
+    BooleanNode right;
+
+    public AndNode(BooleanNode left, BooleanNode right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    @Override
+    public boolean evaluate(Robot robot) {
+        return left.evaluate(robot) && right.evaluate(robot);
+    }
+
+    public String toString() {
+        return "and";
+    }
+
+}
+
+class AssignmentNode implements ProgramNode {
+
+    private String variable;
+    private IntNode expression;
+
+    public AssignmentNode(String variable, IntNode expression) {
+        this.variable = variable;
+        this.expression = expression;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        if (!Parser.variables.containsKey(variable)) {
+            Parser.variables.put(variable, new NumberNode(0));
+        }
+
+    }
+
+    public String toString() {
+        return variable.toString() + " = " + expression.toString();
+    }
+
+}
+
+class BlockNode implements ProgramNode {
+    List<ProgramNode> statements = new ArrayList<ProgramNode>();
+
+    @Override
+    public void execute(Robot robot) {
+        for (ProgramNode s : statements) {
+            s.execute(robot);
+        }
+    }
+
+    public BlockNode(List<ProgramNode> statements) {
+        this.statements = statements;
+    }
+
+    public String toString() {
+        String string = "";
+        for (ProgramNode statement : statements) {
+            string += statement.toString() + " ";
+        }
+        return "{" + string + "}";
+    }
+}
+
+interface BooleanNode {
+    public boolean evaluate(Robot robot);
+}
+
+class ConditionNode implements BooleanNode {
+
+    private BooleanNode condition;
+
+    public ConditionNode(BooleanNode condition) {
+        this.condition = condition;
+    }
+
+    @Override
+    public boolean evaluate(Robot robot) {
+        return condition.evaluate(robot);
+    }
+
+    public String toString() {
+        return condition.toString();
+    }
+}
+
+class ElseIfNode implements BooleanNode {
+
+    private BooleanNode condition;
+    private BlockNode block;
+
+    public ElseIfNode(BooleanNode condition, BlockNode block) {
+        this.condition = condition;
+        this.block = block;
+    }
+
+    @Override
+    public boolean evaluate(Robot robot) {
+        if (condition.evaluate(robot)) {
+            block.execute(robot);
+        }
+        return condition.evaluate(robot);
+    }
+
+    public String toString() {
+        return "else if (" + condition + ") " + block;
+    }
+
+}
+
+class ElseNode implements ProgramNode {
+    BlockNode block;
+    private List<ElseIfNode> elifs;
+
+    public ElseNode(BlockNode block) {
+        this.block = block;
+    }
+
+    public ElseNode(BlockNode block, List<ElseIfNode> elifs) {
+        this.block = block;
+        this.elifs = elifs;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        block.execute(robot);
+    }
+
+    public String toString() {
+        return "else";
+    }
+}
+
+class EqualToNode implements BooleanNode {
+
+    private IntNode left;
+    private IntNode right;
+
+    public EqualToNode(IntNode left, IntNode right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    public boolean evaluate(Robot robot) {
+        return left.evaluate(robot) == right.evaluate(robot);
+    }
+
+    public String toString() {
+        return "eq";
+    }
+
+}
+
+class ExpressionNode implements ProgramNode {
+    private ProgramNode node;
+
+    public ExpressionNode(ProgramNode node) {
+        this.node = node;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        node.execute(robot);
+    }
+
+    public String toString() {
+        return node.toString();
+    }
+}
+
+class GetClosestBarrelFB implements IntNode {
+    private IntNode expr;
+
+    public GetClosestBarrelFB() {
+    }
+
+    public GetClosestBarrelFB(IntNode expr) {
+        this.expr = expr;
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        if (expr != null) {
+            return robot.getBarrelFB(expr.evaluate(robot));
+        }
+        return robot.getClosestBarrelFB();
+    }
+
+    public String toString() {
+        return expr == null ? "barrelFB" : "barrelFB (" + expr + ")";
+    }
+
+}
+
+class GetClosestBarrelLR implements IntNode {
+    private IntNode expr;
+
+    public GetClosestBarrelLR() {
+    }
+
+    public GetClosestBarrelLR(IntNode expr) {
+        this.expr = expr;
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        if (expr != null) {
+            return robot.getBarrelLR(expr.evaluate(robot));
+        }
+        return robot.getClosestBarrelLR();
+    }
+
+    public String toString() {
+        return expr == null ? "barrelLR" : "barrelLR (" + expr + ")";
+    }
+
+}
+
+class GetFuelNode implements IntNode {
+
+    public GetFuelNode() {
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return robot.getFuel();
+    }
+
+    public String toString() {
+        return "fuelLeft";
+    }
+}
+
+class GetNumBarrels implements IntNode {
+
+    public GetNumBarrels() {
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return robot.numBarrels();
+    }
+
+    public String toString() {
+        return "numBarrels";
+    }
+}
+
+class GetOpponentFB implements IntNode {
+
+    public GetOpponentFB() {
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return robot.getOpponentFB();
+    }
+
+    public String toString() {
+        return "opponentFB";
+
+    }
+}
+
+class GetOpponentLR implements IntNode {
+
+    public GetOpponentLR() {
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return robot.getOpponentLR();
+    }
+
+    public String toString() {
+        return "opponentLR";
+    }
+}
+
+class GetWallDistance implements IntNode {
+
+    public GetWallDistance() {
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return robot.getDistanceToWall();
+    }
+
+    public String toString() {
+        return "wallDistance";
+    }
+
+}
+
+class GreaterThanNode implements BooleanNode {
+
+    private IntNode left;
+    private IntNode right;
+
+    public GreaterThanNode(IntNode left, IntNode right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    public boolean evaluate(Robot robot) {
+        return left.evaluate(robot) > right.evaluate(robot);
+    }
+
+    public String toString() {
+        return "gt";
+    }
+
+}
+
+class IfNode implements ProgramNode {
+
+    BooleanNode condition;
+    BlockNode block;
+    private List<ElseIfNode> elifs;
+    ElseNode elseBranch;
+
+    public IfNode(BooleanNode condition, BlockNode block) {
+        this.condition = condition;
+        this.block = block;
+    }
+
+    public IfNode(BooleanNode condition, BlockNode block, List<ElseIfNode> elifs, ElseNode elseBranch) {
+        this.condition = condition;
+        this.block = block;
+        this.elifs = elifs;
+        this.elseBranch = elseBranch;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        if (condition.evaluate(robot)) {
+            block.execute(robot);
+        } else {
+            for (var elif : elifs) {
+                if (elif.evaluate(robot))
+                    return;
+            }
+            if (elseBranch != null) {
+                elseBranch.execute(robot);
+                return;
+            }
+        }
+    }
+
+    public String toString() {
+        return elifs == null ? "if (" + condition + ") " + block
+                : "if (" + condition + ") " + block + " " + elifs.toString();
+    }
+
+}
+
+interface IntNode {
+    public int evaluate(Robot robot);
+}
+
+class LessThanNode implements BooleanNode {
+
+    private IntNode left;
+    private IntNode right;
+
+    public LessThanNode(IntNode left, IntNode right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    public boolean evaluate(Robot robot) {
+        int leftNode = left.evaluate(robot);
+        int rightNode = right.evaluate(robot);
+        return leftNode < rightNode;
+    }
+
+    public String toString() {
+        return "lt";
+    }
+}
+
+class LoopNode implements ProgramNode {
+
+    BlockNode block;
+
+    public LoopNode(BlockNode block) {
+        this.block = block;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        while (true) {
+            block.execute(robot);
+        }
+    }
+
+    public String toString() {
+        return "loop" + this.block.toString();
+    }
+}
+
+class MoveNode implements ProgramNode {
+    private IntNode value;
+
+    public MoveNode() {
+    }
+
+    public MoveNode(IntNode value) {
+        this.value = value;
+    }
+
+    @Override
+    /**
+     * Executes action based on number of value times
+     */
+    public void execute(Robot robot) {
+        if (value == null) {
+            robot.move();
+            return;
+        }
+        int stepsToMove = value.evaluate(robot);
+        for (int i = 0; i < stepsToMove; i++) {
+            robot.move();
+        }
+    }
+
+    public String toString() {
+        return value == null ? "move()" : "move(" + value.toString() + ")";
+    }
+
+}
+
+class NotNode implements BooleanNode {
+    BooleanNode condition;
+
+    public NotNode(BooleanNode condition) {
+        this.condition = condition;
+    }
+
+    @Override
+    public boolean evaluate(Robot robot) {
+        return !condition.evaluate(robot);
+    }
+
+    public String toString() {
+        return "not";
+    }
+}
+
+class NumberNode implements IntNode {
+    private int number;
+
+    public NumberNode(int number) {
+        this.number = number;
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return number;
+    }
+
+    public String toString() {
+        return "" + number;
+    }
+
+}
+
+class OperationNode implements IntNode {
+
+    IntNode left;
+    IntNode right;
+    String operation;
+
+    public OperationNode(String operation, IntNode left, IntNode right) {
+        this.left = left;
+        this.right = right;
+        this.operation = operation;
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        switch (operation) {
+            case "add":
+                return left.evaluate(robot) + right.evaluate(robot);
+            case "sub":
+                return left.evaluate(robot) - right.evaluate(robot);
+            case "mul":
+                return left.evaluate(robot) * right.evaluate(robot);
+            case "div":
+                return left.evaluate(robot) / right.evaluate(robot);
+            default:
+                return 0;
+        }
+    }
+
+    public String toString() {
+        return operation + "(" + left.toString() + "," + right.toString() + ")";
+    }
+}
+
+class OrNode implements BooleanNode {
+
+    BooleanNode left;
+    BooleanNode right;
+
+    public OrNode(BooleanNode left, BooleanNode right) {
+        this.left = left;
+        this.right = right;
+    }
+
+    @Override
+    public boolean evaluate(Robot robot) {
+        return left.evaluate(robot) || right.evaluate(robot);
+    }
+
+    public String toString() {
+        return "or";
+    }
+
+}
+
+class SensorNode implements IntNode {
+
+    private IntNode sensor;
+
+    public SensorNode(IntNode sensor) {
+        this.sensor = sensor;
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return sensor.evaluate(robot);
+    }
+
+    public String toString() {
+        return sensor.toString();
+    }
+}
+
+class ShieldOffNode implements ProgramNode {
+    public ShieldOffNode() {
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        robot.setShield(false);
+    }
+
+    public String toString() {
+        return "shieldOFF";
+    }
+
+}
+
+class ShieldOnNode implements ProgramNode {
+    public ShieldOnNode() {
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        robot.setShield(true);
+    }
+
+    public String toString() {
+        return "shieldON";
+    }
+
+}
+
+class StatementNode implements ProgramNode {
+    ProgramNode statement;
+
+    public StatementNode(ProgramNode statement) {
+        this.statement = statement;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        statement.execute(robot);
+    }
+
+    public String toString() {
+        return (statement instanceof ActionNode) ? (statement.toString() + " ;") : (statement.toString());
+    }
+
+}
+
+class TakeFuelNode implements ProgramNode {
+    public TakeFuelNode() {
+
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        robot.takeFuel();
+    }
+
+    public String toString() {
+        return "takeFuel";
+    }
+
+}
+
+class TurnAroundNode implements ProgramNode {
+    public TurnAroundNode() {
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        robot.turnAround();
+    }
+
+    public String toString() {
+        return "turnAround";
+    }
+}
+
+class TurnLNode implements ProgramNode {
+    public TurnLNode() {
+
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        robot.turnLeft();
+    }
+
+    public String toString() {
+        return "turnL";
+    }
+
+}
+
+class TurnRNode implements ProgramNode {
+    public TurnRNode() {
+
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        robot.turnRight();
+    }
+
+    public String toString() {
+        return "turnR";
+    }
+
+}
+
+class VariableNode implements IntNode {
+
+    private String variable;
+
+    public VariableNode(String variable) {
+        this.variable = variable;
+    }
+
+    @Override
+    public int evaluate(Robot robot) {
+        return Parser.variables.containsKey(variable) ? Parser.variables.get(variable).evaluate(robot) : 0;
+    }
+
+    public String toString() {
+        return variable;
+    }
+
+}
+
+class WaitNode implements ProgramNode {
+    IntNode value;
+
+    public WaitNode() {
+
+    }
+
+    public WaitNode(IntNode value) {
+        this.value = value;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+
+        if (value == null) {
+            robot.idleWait();
+            return;
+        }
+        int stepsToWait = value.evaluate(robot);
+        for (int i = 0; i < stepsToWait; i++) {
+            robot.idleWait();
+        }
+    }
+
+    public String toString() {
+        return value == null ? "wait()" : "wait(" + value.toString() + ")";
+    }
+
+}
+
+class WhileNode implements ProgramNode {
+
+    private BooleanNode condition;
+    private BlockNode block;
+
+    public WhileNode(BooleanNode condition, BlockNode block) {
+        this.condition = condition;
+        this.block = block;
+    }
+
+    @Override
+    public void execute(Robot robot) {
+        while (condition.evaluate(robot)) {
+            block.execute(robot);
+        }
+    }
+
+    public String toString() {
+        return "while (" + condition.toString() + ") " + block.toString();
+    }
+
+}
