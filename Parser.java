@@ -99,7 +99,34 @@ public class Parser {
         while (scanner.hasNext()) {
             statements.add(parseSTMT(scanner));
         }
-        return new BlockNode(statements);
+        return new RootNode(statements);
+    }
+
+    /**
+     * Parses the first node in the tree given a list of statements.
+     */
+    class RootNode implements ProgramNode {
+        private List<ProgramNode> statements;
+
+        public RootNode(List<ProgramNode> statements) {
+            this.statements = statements;
+        }
+
+        @Override
+        public void execute(Robot robot) {
+            for (ProgramNode statement : statements) {
+                statement.execute(robot);
+            }
+        }
+
+        @Override
+        public String toString() {
+            StringBuilder sb = new StringBuilder();
+            for (ProgramNode statement : statements) {
+                sb.append(statement.toString()).append(" ");
+            }
+            return sb.toString();
+        }
     }
 
     // ----------------------------------------------------------------
@@ -138,6 +165,12 @@ public class Parser {
         return null;
     }
 
+    /**
+     * Parses a while node
+     * 
+     * @param scanner
+     * @return
+     */
     private ProgramNode parseWHILE(Scanner scanner) {
         require(WHILE, "expecting 'while'", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -146,6 +179,12 @@ public class Parser {
         return new WhileNode(condition, parseBLOCK(scanner));
     }
 
+    /**
+     * Parses a condition node
+     * 
+     * @param scanner
+     * @return
+     */
     private BooleanNode parseCOND(Scanner scanner) {
         if (scanner.hasNext(RELOP)) {
             return parseRELOP(scanner);
@@ -160,6 +199,12 @@ public class Parser {
         return null;
     }
 
+    /**
+     * Parses an AND node
+     * 
+     * @param scanner
+     * @return
+     */
     private BooleanNode parseAND(Scanner scanner) {
         require("and", "expecting 'and'", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -170,6 +215,12 @@ public class Parser {
         return new AndNode(left, right);
     }
 
+    /**
+     * Parses an OR node
+     * 
+     * @param scanner
+     * @return
+     */
     private BooleanNode parseOR(Scanner scanner) {
         require("or", "expecting 'or'", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -180,6 +231,12 @@ public class Parser {
         return new OrNode(left, right);
     }
 
+    /**
+     * Parses a NOT node
+     * 
+     * @param scanner
+     * @return
+     */
     private BooleanNode parseNOT(Scanner scanner) {
         require("not", "expecting 'not'", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -188,6 +245,13 @@ public class Parser {
         return new NotNode(condition);
     }
 
+    /**
+     * RELOP ::= "lt" | "gt" | "eq"
+     * Parses a relop node
+     * 
+     * @param scanner
+     * @return a relop node
+     */
     private BooleanNode parseRELOP(Scanner scanner) {
         String relop = require(RELOP, "expecting a relop", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -198,10 +262,19 @@ public class Parser {
         return parseRELOP(scanner, relop, left, right);
     }
 
+    /**
+     * Helper method for parses a relop node
+     * "lt" | "gt" | "eq
+     * 
+     * @param scanner
+     * @param relop
+     * @param left
+     * @param right
+     * @return
+     */
     private BooleanNode parseRELOP(Scanner scanner, String relop, IntNode left, IntNode right) {
         switch (relop) {
             case "lt":
-                System.out.println(left + " " + right);
                 return new LessThanNode(left, right);
             case "gt":
                 return new GreaterThanNode(left, right);
@@ -212,6 +285,12 @@ public class Parser {
         return null;
     }
 
+    /**
+     * IF ::= "if" "(" COND ")" BLOCK [ "elif" "(" COND ")" BLOCK ]* [ "else" BLOCK]
+     * 
+     * @param scanner
+     * @return
+     */
     private ProgramNode parseIF(Scanner scanner) {
         require(IF, "expecting 'if'", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -311,22 +390,20 @@ public class Parser {
         return null;
     }
 
+    /**
+     * "fuelLeft" | "oppLR" | "oppFB" | "numBarrels" |
+     * "barrelLR" | "barrelFB" | "wallDist"
+     * 
+     * @param scanner
+     * @return
+     */
     private SensorNode parseSENS(Scanner scanner) {
         String sensor = require(SENS, "expecting a sensor", scanner);
         return new SensorNode(parseSENS(scanner, sensor));
     }
 
     /**
-     * Variables are identifiers starting with a $, and can hold integer values.
-     * Assignment statements can assign a value to a variable, and variables can be
-     * used inside expressions. Variables do not need to be declared. If a variable
-     * is used in an expression before a value has been assigned to it, it is
-     * assumed to have the value 0. The scope of all variables is the whole program.
-     * 
-     * Evaluating an expression now needs to be able to access a map containing all
-     * the current variables and their values, and an assignment statement needs to
-     * update the value of a variable in the map. If a variable being accessed which
-     * is not in the map should be added and given the value 0.
+     * ASSGN::= VAR "=" EXPR
      * 
      * @param scanner
      * @param sensor
@@ -340,17 +417,23 @@ public class Parser {
         require("=", "expecting '='", scanner);
         IntNode value = parseEXPR(scanner);
         variables.put(var, value);
-        System.out.println("VALUE: " + var + value);
         require(SEMICOLON, "expecting ';'", scanner);
         return new AssignmentNode(var, value);
     }
 
+    /**
+     * Parses a variable node
+     * VAR ::= "\\$[A-Za-z][A-Za-z0-9]*"
+     * 
+     * @param scanner
+     * @return a variable node
+     */
     private IntNode parseVAR(Scanner scanner) {
         String var = require(VAR, "expecting a variable", scanner);
         if (!variables.containsKey(var)) {
             variables.put(var, new NumberNode(0));
         }
-        return variables.get(var);
+        return new VariableNode(var);
     }
 
     /**
@@ -396,6 +479,12 @@ public class Parser {
         return new NumberNode(requireInt(NUMPAT, "expecting a number", scanner));
     }
 
+    /**
+     * OP ::= "add" | "sub" | "mul" | "div"
+     * 
+     * @param scanner
+     * @return
+     */
     private IntNode parseOP(Scanner scanner) {
         String op = require(OP, "expecting an operator", scanner);
         require(OPENPAREN, "expecting '('", scanner);
@@ -536,7 +625,7 @@ class ActionNode implements ProgramNode {
     }
 
     public String toString() {
-        return instruction.toString();
+        return instruction.toString() + ';';
     }
 }
 
@@ -576,7 +665,8 @@ class AssignmentNode implements ProgramNode {
         if (!Parser.variables.containsKey(variable)) {
             Parser.variables.put(variable, new NumberNode(0));
         }
-
+        int value = expression.evaluate(robot);
+        Parser.variables.put(variable, new NumberNode(value));
     }
 
     public String toString() {
@@ -649,14 +739,13 @@ class ElseIfNode implements BooleanNode {
     }
 
     public String toString() {
-        return "else if (" + condition + ") " + block;
+        return "elif (" + condition + ")" + block;
     }
 
 }
 
 class ElseNode implements ProgramNode {
     BlockNode block;
-    private List<ElseIfNode> elifs;
 
     public ElseNode(BlockNode block) {
         this.block = block;
@@ -664,7 +753,6 @@ class ElseNode implements ProgramNode {
 
     public ElseNode(BlockNode block, List<ElseIfNode> elifs) {
         this.block = block;
-        this.elifs = elifs;
     }
 
     @Override
@@ -673,7 +761,7 @@ class ElseNode implements ProgramNode {
     }
 
     public String toString() {
-        return "else";
+        return "else" + block.toString();
     }
 }
 
@@ -692,7 +780,7 @@ class EqualToNode implements BooleanNode {
     }
 
     public String toString() {
-        return "eq";
+        return "eq(" + left.toString() + "," + right.toString() + ")";
     }
 
 }
@@ -803,7 +891,7 @@ class GetOpponentFB implements IntNode {
     }
 
     public String toString() {
-        return "opponentFB";
+        return "oppFB";
 
     }
 }
@@ -819,7 +907,7 @@ class GetOpponentLR implements IntNode {
     }
 
     public String toString() {
-        return "opponentLR";
+        return "oppLR";
     }
 }
 
@@ -834,7 +922,7 @@ class GetWallDistance implements IntNode {
     }
 
     public String toString() {
-        return "wallDistance";
+        return "wallDist";
     }
 
 }
@@ -854,7 +942,7 @@ class GreaterThanNode implements BooleanNode {
     }
 
     public String toString() {
-        return "gt";
+        return "gt(" + left.toString() + "," + right.toString() + ")";
     }
 
 }
@@ -883,7 +971,7 @@ class IfNode implements ProgramNode {
         if (condition.evaluate(robot)) {
             block.execute(robot);
         } else {
-            for (var elif : elifs) {
+            for (ElseIfNode elif : elifs) {
                 if (elif.evaluate(robot))
                     return;
             }
@@ -895,8 +983,18 @@ class IfNode implements ProgramNode {
     }
 
     public String toString() {
-        return elifs == null ? "if (" + condition + ") " + block
-                : "if (" + condition + ") " + block + " " + elifs.toString();
+        String string = "if (" + condition.toString() + ") " + block;
+
+        if (elifs.size() > 0) {
+            for (ElseIfNode elif : elifs) {
+                string += " " + elif.toString();
+            }
+        }
+
+        if (elseBranch != null) {
+            string += " " + elseBranch.toString();
+        }
+        return string;
     }
 
 }
@@ -922,7 +1020,7 @@ class LessThanNode implements BooleanNode {
     }
 
     public String toString() {
-        return "lt";
+        return "lt(" + left.toString() + "," + right.toString() + ")";
     }
 }
 
@@ -972,7 +1070,7 @@ class MoveNode implements ProgramNode {
     }
 
     public String toString() {
-        return value == null ? "move()" : "move(" + value.toString() + ")";
+        return value == null ? "move" : "move(" + value.toString() + ")";
     }
 
 }
@@ -1238,7 +1336,7 @@ class WaitNode implements ProgramNode {
     }
 
     public String toString() {
-        return value == null ? "wait()" : "wait(" + value.toString() + ")";
+        return value == null ? "wait" : "wait(" + value.toString() + ")";
     }
 
 }
